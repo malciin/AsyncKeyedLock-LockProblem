@@ -70,6 +70,22 @@ public class AsyncLockerTest
     }
 
     [Test]
+    public async Task Cannon_AsyncLocker_LockAsync_NoPooling()
+    {
+        var endpointUrl = serverUrl + "/async-locker-lock-async-no-pooling";
+
+        try
+        {
+            await Task.WhenAll(Enumerable.Range(0, 100).Select(x => Cannon(endpointUrl, TimeSpan.FromSeconds(30))));
+        }
+        finally
+        {
+            TestContext.Out.WriteLine($"All requests: {totalRequests}");
+            TestContext.Out.WriteLine($"Success: {successRequests}");
+        }
+    }
+
+    [Test]
     public async Task Cannon_NativeLocker()
     {
         var endpointUrl = serverUrl + "/native-lock";

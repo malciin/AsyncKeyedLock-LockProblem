@@ -20,11 +20,21 @@ public partial class Program
 
         var app = builder.Build();
 
+        RegisterAsyncLockerEndpoint(app);
+        RegisterAsyncLockerEndpoint_LockAsync(app);
+        RegisterAsyncLockerEndpoint_LockAsync_NoPooling(app);
+        RegisterNativeLock(app);
+
+        return app;
+    }
+
+    private static void RegisterAsyncLockerEndpoint(WebApplication app)
+    {
         var lockId = Guid.NewGuid();
         var locker = new AsyncKeyedLocker<Guid>();
-        var asyncLockerList = Enumerable.Range(0, 100).ToList(); // shared state that needs protection
+        var protectedList = Enumerable.Range(0, 100).ToList(); // shared state that needs protection
         app
-            .MapPost("/async-locker", (Request request) => PopOrPush(request, asyncLockerList))
+            .MapPost("/async-locker", (Request request) => PopOrPush(request, protectedList))
             .AddEndpointFilter(async (context, next) =>
             {
                 using var @lock = locker.LockOrNull(lockId, 0);
@@ -33,12 +43,15 @@ public partial class Program
 
                 return await next(context);
             });
+    }
 
-        var lockId2 = Guid.NewGuid();
-        var locker2 = new AsyncKeyedLocker<Guid>();
-        var asyncLockerList2 = Enumerable.Range(0, 100).ToList(); // shared state that needs protection
+    private static void RegisterAsyncLockerEndpoint_LockAsync(WebApplication app)
+    {
+        var lockId = Guid.NewGuid();
+        var locker = new AsyncKeyedLocker<Guid>();
+        var protectedList = Enumerable.Range(0, 100).ToList(); // shared state that needs protection
         app
-            .MapPost("/async-locker-lock-async", (Request request) => PopOrPush(request, asyncLockerList2))
+            .MapPost("/async-locker-lock-async", (Request request) => PopOrPush(request, protectedList))
             .AddEndpointFilter(async (context, next) =>
             {
                 using var @lock = await locker.LockOrNullAsync(lockId, 0);
@@ -47,14 +60,34 @@ public partial class Program
 
                 return await next(context);
             });
+    }
 
-        var nativeLock = new Lock();
-        var nativeLockList = Enumerable.Range(0, 100).ToList(); // shared state that needs protection
+    private static void RegisterAsyncLockerEndpoint_LockAsync_NoPooling(WebApplication app)
+    {
+        var lockId = Guid.NewGuid();
+        var locker = new AsyncKeyedLocker<Guid>(options => options.PoolSize = 0);
+        var protectedList = Enumerable.Range(0, 100).ToList(); // shared state that needs protection
         app
-            .MapPost("/native-lock", (Request request) => PopOrPush(request, nativeLockList))
+            .MapPost("/async-locker-lock-async-no-pooling", (Request request) => PopOrPush(request, protectedList))
             .AddEndpointFilter(async (context, next) =>
             {
-                if (!nativeLock.TryEnter()) return Results.StatusCode(423); // 423 - Locked
+                using var @lock = await locker.LockOrNullAsync(lockId, 0);
+
+                if (@lock == null) return Results.StatusCode(423); // 423 - Locked
+
+                return await next(context);
+            });
+    }
+
+    private static void RegisterNativeLock(WebApplication app)
+    {
+        var locker = new Lock();
+        var protectedList = Enumerable.Range(0, 100).ToList(); // shared state that needs protection
+        app
+            .MapPost("/native-lock", (Request request) => PopOrPush(request, protectedList))
+            .AddEndpointFilter(async (context, next) =>
+            {
+                if (!locker.TryEnter()) return Results.StatusCode(423); // 423 - Locked
 
                 try
                 {
@@ -62,11 +95,9 @@ public partial class Program
                 }
                 finally
                 {
-                    nativeLock.Exit();
+                    locker.Exit();
                 }
             });
-
-        return app;
     }
 
     private static IResult PopOrPush(Request request, List<int> protectedSyncState)
